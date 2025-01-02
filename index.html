@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#4CAF50">
+    <title>Calorie Tracker</title>
+    <link rel="manifest" href="data:application/json;base64,eyJuYW1lIjoiQ2Fsb3JpZSBUcmFja2VyIiwic2hvcnRfbmFtZSI6IkNhbG9yaWVzIiwic3RhcnRfdXJsIjoiLyIsImRpc3BsYXkiOiJzdGFuZGFsb25lIiwiYmFja2dyb3VuZF9jb2xvciI6IiNmZmZmZmYiLCJ0aGVtZV9jb2xvciI6IiM0Q0FGNTAifQ==">
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .entry-form {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            padding: 10px;
+            background: white;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.1);
+            display: flex;
+            gap: 10px;
+            max-width: 600px;
+            margin: 0 auto;
+        }
+        .entries {
+            margin-bottom: 80px;
+        }
+        .entry {
+            background: white;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            display: flex;
+            justify-content: space-between;
+        }
+        .total {
+            font-size: 24px;
+            font-weight: bold;
+            padding: 20px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        input[type="number"] {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+        }
+        button {
+            padding: 12px 24px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            cursor: pointer;
+        }
+        .negative {
+            color: #f44336;
+        }
+        .date-header {
+            font-weight: bold;
+            margin-top: 20px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="total" id="dayTotal">Today's Total: 0 cal</div>
+    <button onclick="exportToCsv()" style="margin-bottom: 20px; background: #2196F3;">Export to CSV</button>
+    <div class="entries" id="entries"></div>
+    <form class="entry-form" id="calorieForm">
+        <input type="number" id="calories" placeholder="Enter calories (negative for exercise)" required>
+        <button type="submit">Add</button>
+    </form>
+
+    <script>
+        // Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('data:application/javascript;base64,c2VsZi5hZGRFdmVudExpc3RlbmVyKCdpbnN0YWxsJywgZXZlbnQgPT4ge2V2ZW50LndhaXRVbnRpbChzZWxmLnNraXBXYWl0aW5nKCkpfSk7c2VsZi5hZGRFdmVudExpc3RlbmVyKCdhY3RpdmF0ZScsIGV2ZW50ID0+IHtldmVudC53YWl0VW50aWwoc2VsZi5jbGllbnRzLmNsYWltKCkpfSk7c2VsZi5hZGRFdmVudExpc3RlbmVyKCdmZXRjaCcsIGV2ZW50ID0+IHtldmVudC5yZXNwb25kV2l0aChjYWNoZXMubWF0Y2goZXZlbnQucmVxdWVzdCkpfSk7');
+        }
+
+        // Initialize IndexedDB
+        let db;
+        const request = indexedDB.open('CalorieTrackerDB', 1);
+
+        request.onerror = (event) => {
+            console.error('Database error:', event.target.error);
+        };
+
+        request.onupgradeneeded = (event) => {
+            db = event.target.result;
+            if (!db.objectStoreNames.contains('entries')) {
+                db.createObjectStore('entries', { keyPath: 'id', autoIncrement: true });
+            }
+        };
+
+        request.onsuccess = (event) => {
+            db = event.target.result;
+            displayEntries();
+        };
+
+        // Handle form submission
+        document.getElementById('calorieForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            const calories = parseInt(document.getElementById('calories').value);
+            
+            const entry = {
+                calories,
+                timestamp: new Date().toISOString()
+            };
+
+            const transaction = db.transaction(['entries'], 'readwrite');
+            const store = transaction.objectStore('entries');
+            store.add(entry);
+
+            transaction.oncomplete = () => {
+                document.getElementById('calories').value = '';
+                displayEntries();
+            };
+        });
+
+        // Display entries and calculate totals
+        function displayEntries() {
+            const transaction = db.transaction(['entries'], 'readonly');
+            const store = transaction.objectStore('entries');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                const entries = request.result;
+                const entriesByDate = {};
+                
+                // Group entries by date
+                entries.forEach(entry => {
+                    const date = new Date(entry.timestamp).toLocaleDateString();
+                    if (!entriesByDate[date]) {
+                        entriesByDate[date] = [];
+                    }
+                    entriesByDate[date].push(entry);
+                });
+
+                // Display entries and calculate totals
+                const entriesDiv = document.getElementById('entries');
+                entriesDiv.innerHTML = '';
+                
+                const today = new Date().toLocaleDateString();
+                let todayTotal = 0;
+
+                Object.keys(entriesByDate)
+                    .sort((a, b) => new Date(b) - new Date(a))
+                    .forEach(date => {
+                        const dateEntries = entriesByDate[date];
+                        const dateTotal = dateEntries.reduce((sum, entry) => sum + entry.calories, 0);
+                        
+                        if (date === today) {
+                            todayTotal = dateTotal;
+                        }
+
+                        entriesDiv.innerHTML += `
+                            <div class="date-header">${date} - Total: ${dateTotal} cal</div>
+                            ${dateEntries
+                                .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+                                .map(entry => `
+                                    <div class="entry">
+                                        <span>${new Date(entry.timestamp).toLocaleTimeString()}</span>
+                                        <span class="${entry.calories < 0 ? 'negative' : ''}">${entry.calories} cal</span>
+                                    </div>
+                                `).join('')}
+                        `;
+                    });
+
+                document.getElementById('dayTotal').textContent = `Today's Total: ${todayTotal} cal`;
+            };
+        }
+
+        // Export data to CSV
+        function exportToCsv() {
+            const transaction = db.transaction(['entries'], 'readonly');
+            const store = transaction.objectStore('entries');
+            const request = store.getAll();
+
+            request.onsuccess = () => {
+                const entries = request.result;
+                const csvContent = [
+                    ['Date', 'Time', 'Calories'],
+                    ...entries.map(entry => [
+                        new Date(entry.timestamp).toLocaleDateString(),
+                        new Date(entry.timestamp).toLocaleTimeString(),
+                        entry.calories
+                    ])
+                ].map(row => row.join(',')).join('\n');
+
+                const blob = new Blob([csvContent], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `calorie-tracker-${new Date().toLocaleDateString()}.csv`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+            };
+        }
+    </script>
+</body>
+</html>
