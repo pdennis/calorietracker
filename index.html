@@ -77,6 +77,10 @@
 </head>
 <body>
     <div class="total" id="dayTotal">Today's Total: 0 cal</div>
+    <div class="goal-container" style="text-align: center; margin-bottom: 20px;">
+        <input type="number" id="goalInput" placeholder="Daily calorie goal" style="padding: 8px; border-radius: 4px; border: 1px solid #ddd; width: 150px; text-align: center;">
+        <div id="goalDisplay" style="margin-top: 8px; color: #666;"></div>
+    </div>
     <button onclick="exportToCsv()" style="margin-bottom: 20px; background: #2196F3;">Export to CSV</button>
     <div class="entries" id="entries"></div>
     <form class="entry-form" id="calorieForm">
@@ -103,12 +107,53 @@
             if (!db.objectStoreNames.contains('entries')) {
                 db.createObjectStore('entries', { keyPath: 'id', autoIncrement: true });
             }
+            if (!db.objectStoreNames.contains('settings')) {
+                db.createObjectStore('settings', { keyPath: 'id' });
+            }
         };
 
         request.onsuccess = (event) => {
             db = event.target.result;
             displayEntries();
+            loadGoal();
         };
+
+        // Load and save calorie goal
+        function loadGoal() {
+            const transaction = db.transaction(['settings'], 'readonly');
+            const store = transaction.objectStore('settings');
+            const request = store.get('goal');
+
+            request.onsuccess = () => {
+                if (request.result) {
+                    document.getElementById('goalInput').value = request.result.value;
+                    updateGoalDisplay(request.result.value);
+                }
+            };
+        }
+
+        function saveGoal(goal) {
+            const transaction = db.transaction(['settings'], 'readwrite');
+            const store = transaction.objectStore('settings');
+            store.put({ id: 'goal', value: goal });
+            updateGoalDisplay(goal);
+        }
+
+        function updateGoalDisplay(goal) {
+            const display = document.getElementById('goalDisplay');
+            const total = parseInt(document.getElementById('dayTotal').textContent.match(/-?\d+/)[0]);
+            const remaining = goal - total;
+            display.textContent = `${remaining} calories remaining of ${goal}`;
+            display.style.color = remaining < 0 ? '#f44336' : '#666';
+        }
+
+        // Add goal input event listener
+        document.getElementById('goalInput').addEventListener('change', (e) => {
+            const goal = parseInt(e.target.value);
+            if (!isNaN(goal) && goal > 0) {
+                saveGoal(goal);
+            }
+        });
 
         // Handle form submission
         document.getElementById('calorieForm').addEventListener('submit', (e) => {
@@ -180,6 +225,11 @@
                     });
 
                 document.getElementById('dayTotal').textContent = `Today's Total: ${todayTotal} cal`;
+                // Update remaining calories if goal exists
+                const goal = document.getElementById('goalInput').value;
+                if (goal) {
+                    updateGoalDisplay(parseInt(goal));
+                }
             };
         }
 
